@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蕾潔 - 決戰動態瑪奇瑪 (Boss 動態版)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0c0812;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 450px;
+            box-shadow: 0px 0px 25px rgba(255, 42, 95, 0.3);
+            border: 2px solid #ff2a5f;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #110d1a;
+        }
+
+        canvas {
+            display: block;
+            width: 800px;
+            height: 450px;
+            image-rendering: pixelated;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 15px;
+            left: 20px;
+            right: 20px;
+            pointer-events: none;
+            user-select: none;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .hud-text {
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 0 0 5px #000;
+        }
+
+        #boss-ui {
+            display: none;
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 320px;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .boss-hp-bar {
+            width: 100%;
+            height: 14px;
+            background: #333;
+            border: 1px solid #ff2a5f;
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .boss-hp-fill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #ff2a5f, #ff9900);
+            transition: width 0.1s;
+        }
+
+        .modal-screen {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 5, 15, 0.9);
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            z-index: 20;
+        }
+
+        .action-btn {
+            padding: 10px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            background: #ff2a5f;
+            color: #fff;
+            border: none;
+            border-radius: 20px;
+            box-shadow: 0 0 10px rgba(255, 42, 95, 0.5);
+        }
+
+        .controls-hint {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="450"></canvas>
+
+        <div class="ui-layer">
+            <div class="hud-text" style="color: #ff3366;">HP: <span id="hp-display">100</span></div>
+            <div class="hud-text" style="color: #ffcc00;">STAGE: <span id="stage-display">1</span></div>
+            <div class="hud-text" style="color: #00ffcc;">SCORE: <span id="score-display">0</span></div>
+        </div>
+
+        <div id="boss-ui">
+            <div style="color: #ff2a5f; font-size: 13px; font-weight: bold; margin-bottom: 3px;">MAKIMA (瑪奇瑪 - 支配惡魔)
+            </div>
+            <div class="boss-hp-bar">
+                <div id="boss-hp-fill" class="boss-hp-fill"></div>
+            </div>
+        </div>
+
+        <div class="controls-hint">操作說明：W / D 前進 | A 後退 | 空白鍵 跳躍 | 滑鼠左鍵 投擲炸彈</div>
+
+        <!-- Game Over 彈窗 -->
+        <div id="game-over-screen" class="modal-screen">
+            <h1 style="font-size: 42px; color: #ff2a5f; margin-bottom: 10px;">GAME OVER</h1>
+            <p style="font-size: 18px; color: #ccc; margin-bottom: 20px;">最終得分: <span id="final-score"
+                    style="color:#00ffcc;">0</span></p>
+            <button class="action-btn" onclick="game.reset()">重新挑戰</button>
+        </div>
+
+        <!-- 全破關 彈窗 -->
+        <div id="clear-screen" class="modal-screen">
+            <h1 style="font-size: 42px; color: #00ffcc; margin-bottom: 10px;">STAGE CLEAR!</h1>
+            <p style="font-size: 18px; color: #ccc; margin-bottom: 20px;">恭喜蕾潔擊敗瑪奇瑪，成功戰勝支配惡魔！得分: <span id="clear-score"
+                    style="color:#00ffcc;">0</span></p>
+            <button class="action-btn" onclick="game.reset()">再玩一次</button>
+        </div>
+    </div>
+
+    <script>
+        class InputManager {
+            constructor() {
+                this.keys = {};
+                this.mouseDown = false;
+                window.addEventListener('keydown', e => this.keys[e.code] = true);
+                window.addEventListener('keyup', e => this.keys[e.code] = false);
+                window.addEventListener('mousedown', e => { if (e.button === 0) this.mouseDown = true; });
+                window.addEventListener('mouseup', e => { if (e.button === 0) this.mouseDown = false; });
+            }
+            isDown(code) { return !!this.keys[code]; }
+            isClick() { return this.mouseDown; }
+        }
+
+        class Platform {
+            constructor(x, y, width, height) {
+                this.x = x; this.y = y; this.width = width; this.height = height;
+            }
+            render(ctx, cameraX) {
+                const rx = this.x - cameraX;
+                if (rx + this.width < -100 || rx > 900) return;
+                ctx.fillStyle = '#ff2a5f';
+                ctx.fillRect(rx, this.y, this.width, this.height);
+                ctx.fillStyle = '#2b1b3d';
+                ctx.fillRect(rx, this.y + 4, this.width, this.height - 4);
+            }
+        }
+
+        class PixelEnemy {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.width = 20; this.height = 36;
+                this.speed = Math.random() * 30 + 50;
+                this.hp = 30;
+                this.isDead = false;
+            }
+            update(dt, playerX) {
+                const dir = playerX > this.x ? 1 : -1;
+                this.x += dir * this.speed * dt;
+            }
+            render(ctx, cameraX) {
+                const rx = this.x - cameraX;
+                if (rx + this.width < -50 || rx > 850) return;
+                ctx.save();
+                ctx.fillStyle = '#1a1a24'; ctx.fillRect(rx + 4, this.y + 12, 12, 16);
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(rx + 8, this.y + 12, 4, 8);
+                ctx.fillStyle = '#000000'; ctx.fillRect(rx + 9, this.y + 14, 2, 6);
+                ctx.fillStyle = '#ffdbac'; ctx.fillRect(rx + 5, this.y + 2, 10, 10);
+                ctx.fillStyle = '#000000'; ctx.fillRect(rx + 4, this.y + 4, 12, 3);
+                ctx.fillStyle = '#111111'; ctx.fillRect(rx + 4, this.y + 28, 4, 8); ctx.fillRect(rx + 12, this.y + 28, 4, 8);
+                ctx.restore();
+            }
+        }
+
+        // 動態瑪奇瑪 (Makima Boss AI & Animations)
+        class DynamicMakimaBoss {
+            constructor(x, y) {
+                this.baseX = x; this.baseY = y;
+                this.x = x; this.y = y;
+                this.width = 26; this.height = 44;
+                this.hp = 600; this.maxHp = 600;
+
+                this.floatTimer = 0;
+                this.attackTimer = 0;
+                this.hurtTimer = 0;
+                this.moveDir = -1;
+                this.isDead = false;
+            }
+
+            update(dt, playerX, enemyBullets) {
+                // 1. 上下浮空運動 (Floating Animation)
+                this.floatTimer += dt * 3;
+                this.y = this.baseY + Math.sin(this.floatTimer) * 25;
+
+                // 2. 左右移動與追蹤
+                this.x += this.moveDir * 60 * dt;
+                if (this.x < this.baseX - 150) this.moveDir = 1;
+                if (this.x > this.baseX + 50) this.moveDir = -1;
+
+                if (this.hurtTimer > 0) this.hurtTimer -= dt;
+
+                // 3. 攻擊與彈幕邏輯
+                this.attackTimer += dt;
+                const isEnraged = this.hp < this.maxHp * 0.5;
+                const cooldown = isEnraged ? 0.8 : 1.3; // 狂暴狀態縮短冷卻時間
+
+                if (this.attackTimer >= cooldown) {
+                    this.attackTimer = 0;
+                    const targetDir = playerX > this.x ? 1 : -1;
+
+                    if (!isEnraged) {
+                        // 第一階段：基礎單發與雙發衝擊波
+                        enemyBullets.push(new EnemyBullet(this.x + 10, this.y + 15, targetDir * 380, 0));
+                    } else {
+                        // 第二階段（狂暴）：散彈環形彈幕發射
+                        enemyBullets.push(new EnemyBullet(this.x + 10, this.y + 15, targetDir * 360, -80));
+                        enemyBullets.push(new EnemyBullet(this.x + 10, this.y + 15, targetDir * 380, 0));
+                        enemyBullets.push(new EnemyBullet(this.x + 10, this.y + 15, targetDir * 360, 80));
+                    }
+                }
+            }
+
+            takeDamage(dmg) {
+                this.hp -= dmg;
+                this.hurtTimer = 0.15; // 被擊中閃爍
+            }
+
+            render(ctx, cameraX) {
+                const rx = this.x - cameraX;
+                ctx.save();
+
+                // 狂暴模式發光光圈
+                if (this.hp < this.maxHp * 0.5) {
+                    ctx.fillStyle = 'rgba(255, 0, 85, 0.25)';
+                    ctx.beginPath();
+                    ctx.arc(rx + 13, this.y + 20, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 受擊閃紅白效果
+                if (this.hurtTimer > 0) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(rx, this.y, this.width, this.height);
+                    ctx.restore();
+                    return;
+                }
+
+                // 粉橙色長髮
+                ctx.fillStyle = '#e86a58';
+                ctx.fillRect(rx + 2, this.y - 2, 22, 20);
+
+                // 臉部與亮黃色支配之眼
+                ctx.fillStyle = '#ffebd9';
+                ctx.fillRect(rx + 4, this.y + 4, 18, 12);
+                ctx.fillStyle = '#ffcc00'; ctx.fillRect(rx + 6, this.y + 8, 3, 3); ctx.fillRect(rx + 16, this.y + 8, 3, 3);
+
+                // 公安大衣與內襯
+                ctx.fillStyle = '#f0f0f0'; ctx.fillRect(rx + 5, this.y + 16, 16, 20);
+                ctx.fillStyle = '#111122'; ctx.fillRect(rx + 2, this.y + 18, 22, 26); // 大衣擺動
+                ctx.restore();
+            }
+        }
+
+        class EnemyBullet {
+            constructor(x, y, vx, vy = 0) {
+                this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+                this.radius = 6; this.isDead = false;
+            }
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                if (this.x < -100 || this.x > 5000 || this.y < -50 || this.y > 500) this.isDead = true;
+            }
+            render(ctx, cameraX) {
+                ctx.fillStyle = '#ff0055';
+                ctx.beginPath();
+                ctx.arc(this.x - cameraX, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class Player {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.width = 24; this.height = 40;
+                this.vx = 0; this.vy = 0;
+                this.speed = 220; this.gravity = 1100; this.jumpForce = -480;
+                this.isGrounded = false; this.dir = 1; this.hp = 100;
+                this.shootTimer = 0;
+            }
+
+            update(dt, input, bombs, platforms, cameraX, eventBus, stage) {
+                this.vx = 0;
+                if (input.isDown('KeyA') || input.isDown('ArrowLeft')) { this.vx = -this.speed; this.dir = -1; }
+                if (input.isDown('KeyW') || input.isDown('KeyD') || input.isDown('ArrowRight')) { this.vx = this.speed; this.dir = 1; }
+                this.x += this.vx * dt;
+
+                if (stage === 1 && this.x < cameraX) this.x = cameraX;
+                if (stage === 2) this.x = Math.max(cameraX, Math.min(cameraX + 776, this.x));
+
+                const jumpPressed = input.isDown('Space') || input.isDown('ArrowUp');
+                if (jumpPressed && this.isGrounded) { this.vy = this.jumpForce; this.isGrounded = false; }
+
+                this.vy += this.gravity * dt;
+                this.y += this.vy * dt;
+                this.isGrounded = false;
+
+                if (this.vy > 0) {
+                    platforms.forEach(p => {
+                        if (this.x + this.width > p.x && this.x < p.x + p.width && this.y + this.height >= p.y && this.y + this.height - (this.vy * dt) <= p.y + 12) {
+                            this.y = p.y - this.height; this.vy = 0; this.isGrounded = true;
+                        }
+                    });
+                }
+
+                if (this.y > 480) this.takeDamage(100, eventBus);
+
+                if (this.shootTimer > 0) this.shootTimer -= dt;
+                if (input.isClick() && this.shootTimer <= 0) {
+                    this.shootTimer = 0.35;
+                    const bx = this.dir === 1 ? this.x + this.width : this.x - 10;
+                    bombs.push(new Bomb(bx, this.y + 10, this.dir));
+                }
+            }
+
+            render(ctx, cameraX) {
+                const rx = this.x - cameraX;
+                ctx.save();
+                ctx.translate(rx + this.width / 2, this.y + this.height / 2);
+                if (this.dir === -1) ctx.scale(-1, 1);
+
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(-10, -8, 20, 20);
+                ctx.fillStyle = '#ffdbac'; ctx.fillRect(-8, -20, 16, 12);
+                ctx.fillStyle = '#4a3b69'; ctx.fillRect(-10, -22, 20, 8);
+                ctx.fillStyle = '#000000'; ctx.fillRect(-7, -8, 14, 2);
+                ctx.fillStyle = '#221122';
+                if (!this.isGrounded) { ctx.fillRect(-8, 10, 6, 6); ctx.fillRect(2, 6, 6, 6); }
+                else { ctx.fillRect(-8, 12, 6, 8); ctx.fillRect(2, 12, 6, 8); }
+                ctx.restore();
+            }
+
+            takeDamage(amount, eventBus) {
+                this.hp = Math.max(0, this.hp - amount);
+                eventBus.emit('HP_CHANGE', this.hp);
+                if (this.hp <= 0) eventBus.emit('GAME_OVER');
+            }
+        }
+
+        class Bomb {
+            constructor(x, y, dir) {
+                this.x = x; this.y = y; this.dir = dir;
+                this.vx = dir * 450; this.radius = 6; this.isDead = false;
+            }
+            update(dt, cameraX) {
+                this.x += this.vx * dt;
+                if (this.x < cameraX - 100 || this.x > cameraX + 900) this.isDead = true;
+            }
+            render(ctx, cameraX) {
+                ctx.fillStyle = '#ff3300'; ctx.beginPath();
+                ctx.arc(this.x - cameraX, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+
+        class EventBus {
+            constructor() { this.events = {}; }
+            on(event, l) { if (!this.events[event]) this.events[event] = []; this.events[event].push(l); }
+            emit(event, data) { if (this.events[event]) this.events[event].forEach(l => l(data)); }
+        }
+
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.input = new InputManager();
+                this.eventBus = new EventBus();
+
+                this.hpDisplay = document.getElementById('hp-display');
+                this.stageDisplay = document.getElementById('stage-display');
+                this.scoreDisplay = document.getElementById('score-display');
+                this.finalScore = document.getElementById('final-score');
+                this.clearScore = document.getElementById('clear-score');
+                this.bossUi = document.getElementById('boss-ui');
+                this.bossHpFill = document.getElementById('boss-hp-fill');
+
+                this.gameOverScreen = document.getElementById('game-over-screen');
+                this.clearScreen = document.getElementById('clear-screen');
+
+                this.eventBus.on('HP_CHANGE', hp => this.hpDisplay.textContent = hp);
+                this.eventBus.on('GAME_OVER', () => {
+                    this.isGameOver = true;
+                    this.finalScore.textContent = Math.floor(this.score);
+                    this.gameOverScreen.style.display = 'flex';
+                });
+
+                this.reset();
+            }
+
+            reset() {
+                this.stage = 1;
+                this.cameraX = 0;
+                this.scrollSpeed = 90;
+                this.player = new Player(100, 300);
+                this.enemies = [];
+                this.enemyBullets = [];
+                this.bombs = [];
+                this.platforms = [];
+                this.boss = null;
+                this.goalDistance = 2500;
+                this.lastPlatformX = 0;
+
+                this.generateMapUpTo(3000);
+
+                this.score = 0;
+                this.isGameOver = false;
+                this.isCleared = false;
+                this.lastTime = 0;
+                this.stageDisplay.textContent = 1;
+                this.scoreDisplay.textContent = 0;
+                this.bossUi.style.display = 'none';
+                this.gameOverScreen.style.display = 'none';
+                this.clearScreen.style.display = 'none';
+                this.eventBus.emit('HP_CHANGE', this.player.hp);
+            }
+
+            startStage2() {
+                this.stage = 2;
+                this.stageDisplay.textContent = 2;
+                this.cameraX = this.goalDistance;
+                this.player.x = this.cameraX + 100;
+                this.player.y = 300;
+                this.enemies = [];
+                this.bombs = [];
+                this.enemyBullets = [];
+
+                this.platforms = [new Platform(this.cameraX, 360, 800, 90)];
+                this.boss = new DynamicMakimaBoss(this.cameraX + 650, 250); // 動態 Boss
+                this.bossUi.style.display = 'block';
+            }
+
+            generateMapUpTo(targetX) {
+                if (this.platforms.length === 0) {
+                    this.platforms.push(new Platform(0, 360, 600, 90));
+                    this.lastPlatformX = 600;
+                }
+
+                while (this.lastPlatformX < targetX) {
+                    const gap = Math.random() * 80 + 50;
+                    const platWidth = Math.random() * 200 + 150;
+                    const platY = 360 - (Math.random() < 0.4 ? Math.random() * 80 + 40 : 0);
+                    const startX = this.lastPlatformX + gap;
+
+                    this.platforms.push(new Platform(startX, platY, platWidth, 450 - platY));
+                    if (Math.random() < 0.6) {
+                        this.enemies.push(new PixelEnemy(startX + platWidth / 2, platY - 36));
+                    }
+                    this.lastPlatformX = startX + platWidth;
+                }
+            }
+
+            start() { requestAnimationFrame(this.loop.bind(this)); }
+
+            loop(timestamp) {
+                if (!this.lastTime) this.lastTime = timestamp;
+                const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
+                this.lastTime = timestamp;
+
+                if (!this.isGameOver && !this.isCleared) {
+                    this.update(dt);
+                    this.render();
+                }
+                requestAnimationFrame(this.loop.bind(this));
+            }
+
+            update(dt) {
+                if (this.stage === 1) {
+                    this.cameraX += this.scrollSpeed * dt;
+                    this.score += dt * 10;
+                    this.scoreDisplay.textContent = Math.floor(this.score);
+
+                    if (this.player.x >= this.goalDistance) {
+                        this.startStage2();
+                        return;
+                    }
+                } else if (this.stage === 2 && this.boss) {
+                    this.boss.update(dt, this.player.x, this.enemyBullets);
+                    this.bossHpFill.style.width = `${Math.max(0, (this.boss.hp / this.boss.maxHp) * 100)}%`;
+
+                    if (this.boss.hp <= 0) {
+                        this.isCleared = true;
+                        this.score += 1000;
+                        this.clearScore.textContent = Math.floor(this.score);
+                        this.clearScreen.style.display = 'flex';
+                        return;
+                    }
+                }
+
+                this.player.update(dt, this.input, this.bombs, this.platforms, this.cameraX, this.eventBus, this.stage);
+
+                this.bombs.forEach(b => b.update(dt, this.cameraX));
+                this.bombs = this.bombs.filter(b => !b.isDead);
+
+                this.enemyBullets.forEach(eb => eb.update(dt));
+                this.enemyBullets = this.enemyBullets.filter(eb => !eb.isDead);
+
+                this.enemyBullets.forEach(eb => {
+                    if (Math.abs(eb.x - this.player.x) < 20 && Math.abs(eb.y - this.player.y) < 25) {
+                        this.player.takeDamage(15, this.eventBus);
+                        eb.isDead = true;
+                    }
+                });
+
+                if (this.boss) {
+                    this.bombs.forEach(b => {
+                        if (b.x > this.boss.x && b.x < this.boss.x + this.boss.width && b.y > this.boss.y && b.y < this.boss.y + this.boss.height) {
+                            this.boss.takeDamage(25);
+                            b.isDead = true;
+                        }
+                    });
+                }
+
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const e = this.enemies[i];
+                    e.update(dt, this.player.x);
+
+                    this.bombs.forEach(b => {
+                        if (b.x > e.x && b.x < e.x + e.width && b.y > e.y && b.y < e.y + e.height) {
+                            e.hp -= 30; b.isDead = true;
+                        }
+                    });
+
+                    if (Math.abs(e.x - this.player.x) < 18 && Math.abs(e.y - this.player.y) < 25) {
+                        this.player.takeDamage(10, this.eventBus); e.isDead = true;
+                    }
+
+                    if (e.hp <= 0) { this.score += 100; this.enemies.splice(i, 1); }
+                }
+            }
+
+            render() {
+                this.ctx.clearRect(0, 0, 800, 450);
+
+                this.ctx.fillStyle = this.stage === 1 ? '#1c152a' : '#110a18';
+                this.ctx.fillRect(0, 0, 800, 450);
+
+                this.platforms.forEach(p => p.render(this.ctx, this.cameraX));
+                this.player.render(this.ctx, this.cameraX);
+                if (this.boss) this.boss.render(this.ctx, this.cameraX);
+                this.enemies.forEach(e => e.render(this.ctx, this.cameraX));
+                this.enemyBullets.forEach(eb => eb.render(this.ctx, this.cameraX));
+                this.bombs.forEach(b => b.render(this.ctx, this.cameraX));
+            }
+        }
+
+        let game;
+        window.onload = () => { game = new Game(); game.start(); };
+    </script>
+</body>
+
+</html>
